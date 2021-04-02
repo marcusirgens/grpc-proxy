@@ -1,4 +1,6 @@
-// Copyright 2017 Michal Witkowski. All Rights Reserved.
+// Copyright 2017-2018 Valient Gough
+// Copyright 2017 Michal Witkowski
+// All Rights Reserved.
 // See LICENSE for licensing terms.
 
 package proxy
@@ -9,6 +11,8 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/anypb"
 )
@@ -68,6 +72,7 @@ func (s *handler) handler(srv interface{}, serverStream grpc.ServerStream) error
 	}
 
 	clientCtx, clientCancel := context.WithCancel(outgoingCtx)
+	clientCtx = addForwardedFor(clientCtx, serverStream.Context())
 	defer clientCancel()
 	// TODO(mwitkow): Add a `forwarded` header to metadata, https://en.wikipedia.org/wiki/X-Forwarded-For.
 	clientStream, err := grpc.NewClientStream(clientCtx, clientStreamDescForProxying, backendConn, fullMethodName)
@@ -157,4 +162,14 @@ func (s *handler) forwardServerToClient(src grpc.ServerStream, dst grpc.ClientSt
 		}
 	}()
 	return ret
+}
+
+// An additional X-Forwarded-For metadata entry is added or appended to with
+// the peer address from the server context. See https://en.wikipedia.org/wiki/X-Forwarded-For.
+func addForwardedFor(ctx context.Context, serverCtx context.Context) context.Context {
+	source := "unknown"
+	if peer, ok := peer.FromContext(serverCtx); ok && peer.Addr != nil {
+		source = peer.Addr.String()
+	}
+	return metadata.AppendToOutgoingContext(ctx, "x-forwarded-for", source)
 }
